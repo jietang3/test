@@ -246,6 +246,11 @@ public class BaseJdbcClient
         throw new UnsupportedOperationException();
     }
 
+    protected String toTypeString(ColumnType columnType)
+    {
+    	throw new UnsupportedOperationException();
+    }
+    
     protected ColumnType toColumnType(int jdbcType)
     {
         switch (jdbcType) {
@@ -256,6 +261,9 @@ public class BaseJdbcClient
             case Types.SMALLINT:
             case Types.INTEGER:
             case Types.BIGINT:
+            case Types.DATE:
+            case Types.TIME:
+            case Types.TIMESTAMP:
                 return ColumnType.LONG;
             case Types.FLOAT:
             case Types.REAL:

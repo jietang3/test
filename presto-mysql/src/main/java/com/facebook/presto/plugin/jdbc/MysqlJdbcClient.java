@@ -13,22 +13,32 @@
  */
 package com.facebook.presto.plugin.jdbc;
 
-import com.facebook.presto.spi.SchemaTableName;
-import com.google.common.base.Throwables;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterables;
 
-import javax.inject.Inject;
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import javax.inject.Inject;
+
+import com.facebook.presto.spi.ColumnMetadata;
+import com.facebook.presto.spi.ColumnType;
+import com.facebook.presto.spi.ConnectorTableMetadata;
+import com.facebook.presto.spi.SchemaTableName;
+import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+
 
 public class MysqlJdbcClient
         extends BaseJdbcClient
@@ -101,5 +111,191 @@ public class MysqlJdbcClient
         catch (SQLException e) {
             throw Throwables.propagate(e);
         }
+    }
+    
+    @Override
+    public JdbcOutputTableHandle beginCreateTable(ConnectorTableMetadata tableMetadata)
+    {
+    	//throw new UnsupportedOperationException();
+        // checkArgument(!isNullOrEmpty(tableMetadata.getOwner()), "Table owner is null or empty");
+
+        ImmutableList.Builder<String> columnNames = ImmutableList.builder();
+        ImmutableList.Builder<ColumnType> columnTypes = ImmutableList.builder();
+        for (ColumnMetadata column : tableMetadata.getColumns()) {
+            columnNames.add(column.getName());
+            columnTypes.add(column.getType());
+        }
+        
+        // get the root directory for the database
+        SchemaTableName table = tableMetadata.getTable();
+        String schemaName = table.getSchemaName();
+        String tableName = table.getTableName();
+        
+        checkState(getTableHandle(table) == null, String.format("%s.%s already exists!", schemaName, tableName));
+        
+        JdbcOutputTableHandle handle = new JdbcOutputTableHandle(
+        		connectorId,
+        		schemaName,
+        		null,
+        		tableName,
+        		columnNames.build(),
+        		columnTypes.build(),
+        		tableMetadata.getOwner(),
+        		"",
+        		"",
+        		new HashMap<String,String>());
+        
+        
+        Connection conn = null;
+    	Statement stmt = null;
+    	
+    	try {
+			conn = this.getConnection(handle);
+			checkNotNull(conn, "conn is null!");
+			stmt = conn.createStatement();
+			
+			StringBuilder sqlBuilder = new StringBuilder();
+			
+			sqlBuilder.append(String.format("create table %s.%s (", handle.getCatalogName(), handle.getTableName()));
+			
+			List<String> columnNameList = handle.getColumnNames();
+			List<ColumnType> columnTypeList = handle.getColumnTypes();
+			for (int i = 0; i < columnNameList.size(); i++)
+			{
+				sqlBuilder.append(String.format("%s %s,", columnNameList.get(i), toTypeString(columnTypeList.get(i))));
+			}
+			
+			sqlBuilder.deleteCharAt(sqlBuilder.length() - 1);
+			sqlBuilder.append(")");
+			
+			stmt.executeUpdate(sqlBuilder.toString());
+			
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+    	finally
+    	{
+    		try {
+				if (conn != null)
+					conn.close();
+			} catch (SQLException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+    		
+    		try {
+				if (stmt != null)
+					stmt.close();
+			} catch (SQLException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+    	}
+    	
+    	return handle;
+    }
+    
+//    @Override
+//    public void commitCreateTable(JdbcOutputTableHandle handle, Collection<String> fragments)
+//    {
+//    	Connection conn = null;
+//    	Statement stmt = null;
+//    	
+//    	try {
+//			conn = this.getConnection(handle);
+//			checkNotNull(conn, "conn is null!");
+//			stmt = conn.createStatement();
+//			
+//			StringBuilder sqlBuilder = new StringBuilder();
+//			
+//			sqlBuilder.append(String.format("create table %s.%s (", handle.getCatalogName(), handle.getTableName()));
+//			
+//			List<String> columnNames = handle.getColumnNames();
+//			List<ColumnType> columnTypes = handle.getColumnTypes();
+//			for (int i = 0; i < columnNames.size(); i++)
+//			{
+//				sqlBuilder.append(String.format("%s %s,", columnNames.get(i), toTypeString(columnTypes.get(i))));
+//			}
+//			
+//			sqlBuilder.deleteCharAt(sqlBuilder.length() - 1);
+//			sqlBuilder.append(")");
+//			
+//			stmt.executeUpdate(sqlBuilder.toString());
+//			
+//		} catch (Exception e) {
+//			// TODO Auto-generated catch block
+//			e.printStackTrace();
+//		}
+//    	finally
+//    	{
+//    		try {
+//				if (conn != null)
+//					conn.close();
+//			} catch (SQLException e) {
+//				// TODO Auto-generated catch block
+//				e.printStackTrace();
+//			}
+//    		
+//    		try {
+//				if (stmt != null)
+//					stmt.close();
+//			} catch (SQLException e) {
+//				// TODO Auto-generated catch block
+//				e.printStackTrace();
+//			}
+//    	}
+//    }
+    
+    @Override
+    public Connection getConnection(JdbcOutputTableHandle handle)
+    {
+    		try {
+				return driver.connect(connectionUrl, connectionProperties);
+			} catch (SQLException e) {
+				
+				e.printStackTrace();
+				return null;
+			}
+    }
+    
+    @Override
+    protected String toTypeString(ColumnType columnType)
+    {
+    	switch (columnType)
+    	{
+    	case LONG:
+    		return "bigint";
+    	case BOOLEAN:
+    		return "boolean";
+    	case DOUBLE:
+    		return "double";
+    	case STRING:
+    		return "varchar(1024)";
+    	default:
+    		throw new IllegalArgumentException("columnType");
+    	}
+    }
+    
+    @Override
+    public String buildInsertSql(JdbcOutputTableHandle handle)
+    {
+        StringBuilder sqlBuilder = new StringBuilder();
+        sqlBuilder.append(String.format("insert into %s.%s values(", handle.getCatalogName(), handle.getTableName()));
+        
+        for (int i = 0; i < handle.getColumnNames().size(); i++)
+		{
+			sqlBuilder.append("?,");
+		}
+        
+        sqlBuilder.deleteCharAt(sqlBuilder.length() - 1);
+		sqlBuilder.append(")");
+		
+		return sqlBuilder.toString();
+    }
+    
+    @Override
+    public void commitCreateTable(JdbcOutputTableHandle handle, Collection<String> fragments)
+    {
     }
 }
